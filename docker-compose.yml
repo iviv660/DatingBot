@@ -1,0 +1,66 @@
+services:
+### User Service #########################################################################################
+  user_postgres:
+    image: postgres:16
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${USER_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${USER_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${USER_POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - user_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${USER_POSTGRES_USER} -d ${USER_POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  user_redis:
+    image: redis:7
+    command: [ "redis-server", "--appendonly", "yes", "--port", "6379" ]
+    ports:
+      - "6379:6379"
+    volumes:
+      - user_redis_data:/data
+    restart: unless-stopped
+
+### Match Service #####################################################################################
+  match_postgres:
+    image: postgres:16
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${MATCH_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${MATCH_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${MATCH_POSTGRES_DB}
+    ports:
+      - "5433:5432"
+    volumes:
+      - match_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MATCH_POSTGRES_USER} -d ${MATCH_POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  match_redis:
+    image: redis:7
+    command: [ "redis-server", "--appendonly", "yes", "--port", "6380" ]
+    ports:
+      - "6380:6380"
+    volumes:
+      - match_redis_data:/data
+    restart: unless-stopped
+
+
+volumes:
+  user_postgres_data:
+  match_postgres_data:
+  user_redis_data:
+  match_redis_data:
+
