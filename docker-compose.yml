@@ -1,5 +1,23 @@
 services:
-### User Service #########################################################################################
+  user_service:
+    build:
+     context: .
+     dockerfile: user/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "50051:50051"
+    depends_on:
+      user_postgres:
+        condition: service_healthy
+      user_migrations:
+        condition: service_completed_successfully
+      user_redis:
+        condition: service_started
+      user_minio:
+        condition: service_started
+    restart: unless-stopped
+
   user_postgres:
     image: postgres:16
     env_file:
@@ -21,46 +39,41 @@ services:
 
   user_redis:
     image: redis:7
-    command: [ "redis-server", "--appendonly", "yes", "--port", "6379" ]
+    command: ["redis-server", "--appendonly", "yes", "--port", "6379"]
     ports:
       - "6379:6379"
     volumes:
       - user_redis_data:/data
     restart: unless-stopped
 
-### Match Service #####################################################################################
-  match_postgres:
-    image: postgres:16
-    env_file:
-      - .env
+  user_minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
     environment:
-      POSTGRES_USER: ${MATCH_POSTGRES_USER}
-      POSTGRES_PASSWORD: ${MATCH_POSTGRES_PASSWORD}
-      POSTGRES_DB: ${MATCH_POSTGRES_DB}
+      MINIO_ROOT_USER: ${USER_MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${USER_MINIO_SECRET_KEY}
     ports:
-      - "5433:5432"
+      - "9000:9000"
+      - "9001:9001"
     volumes:
-      - match_postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${MATCH_POSTGRES_USER} -d ${MATCH_POSTGRES_DB}"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
+      - user_minio_data:/data
     restart: unless-stopped
 
-  match_redis:
-    image: redis:7
-    command: [ "redis-server", "--appendonly", "yes", "--port", "6380" ]
-    ports:
-      - "6380:6380"
+  user_migrations:
+    image: migrate/migrate
+    depends_on:
+      user_postgres:
+        condition: service_healthy
     volumes:
-      - match_redis_data:/data
-    restart: unless-stopped
-
+      - ./user/migrations:/migrations
+    command: [
+      "-path", "/migrations",
+      "-database", "postgres://${USER_POSTGRES_USER}:${USER_POSTGRES_PASSWORD}@user_postgres:5432/${USER_POSTGRES_DB}?sslmode=disable",
+      "up"
+    ]
+    restart: "on-failure"
 
 volumes:
   user_postgres_data:
-  match_postgres_data:
   user_redis_data:
-  match_redis_data:
-
+  user_minio_data:

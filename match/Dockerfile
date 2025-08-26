@@ -6,10 +6,10 @@ RUN apk add --no-cache git ca-certificates && update-ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY user/ ./user/
+COPY match/ ./match/
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-    go build -trimpath -ldflags "-s -w" -o /app ./user/cmd/app
+    go build -trimpath -ldflags "-s -w" -o /app ./match/cmd/app
 
 # ---------- Runtime ----------
 FROM gcr.io/distroless/static-debian12:nonroot

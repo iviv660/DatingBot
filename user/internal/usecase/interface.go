@@ -7,16 +7,17 @@ import (
 	"io"
 )
 
-type UserRepo interface {
+type Repo interface {
 	GetByTelegramID(ctx context.Context, telegramID int64) (*entity.User, error)
 	Create(ctx context.Context, user *entity.User) (*entity.User, error)
 	GetProfile(ctx context.Context, userID int64) (*entity.User, error)
 	UpdateProfile(ctx context.Context, userID int64, input dto.UpdateProfileInput) (*entity.User, error)
 	GetCandidates(ctx context.Context, filter dto.CandidateFilter) ([]*entity.User, error)
 	ToggleVisibility(ctx context.Context, userID int64, isVisible bool) error
+	UpdatePhoto(ctx context.Context, userID int64, url string) error
 }
 
-type CacheRepo interface {
+type Cache interface {
 	SetProfile(ctx context.Context, user *entity.User) error
 	GetProfile(ctx context.Context, userID int64) (*entity.User, error)
 	Invalidate(ctx context.Context, userID int64) error

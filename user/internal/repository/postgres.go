@@ -18,7 +18,7 @@ func NewPostgresDB(db *sql.DB) *PostgresDB {
 	return &PostgresDB{DB: db}
 }
 
-func (db *PostgresDB) RegisterUser(ctx context.Context, user *entity.User) (*entity.User, error) {
+func (db *PostgresDB) Create(ctx context.Context, user *entity.User) (*entity.User, error) {
 	query := `
 		INSERT INTO users (
 			telegram_id, username, age, 
@@ -176,24 +176,60 @@ func (db *PostgresDB) UpdateProfile(ctx context.Context, userID int64, input dto
 
 	return user, nil
 }
+func (db *PostgresDB) GetCandidates(ctx context.Context, filter dto.CandidateFilter) ([]*entity.User, error) {
+	query := `
+		SELECT 
+			id, telegram_id, username, age, gender, location, description, photo_url, is_visible, created_at
+		FROM users
+		WHERE gender = $1
+		  AND age >= $2
+		  AND age <= $3
+		  AND location = $4
+		  AND is_visible = TRUE
+		LIMIT $5
+	`
 
-func (db *PostgresDB) GetCandidates(ctx context.Context, filter dto.CandidateFilter) ([]int64, error) {
-	query := "SELECT id FROM users WHERE gender=$1 AND age >= $2 AND age <= $3 AND location=$4 AND is_visible=TRUE LIMIT $5"
 	rows, err := db.DB.QueryContext(ctx, query, filter.TargetGender, filter.MinAge, filter.MaxAge, filter.Location, filter.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var ids []int64
+	var users []*entity.User
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+		var (
+			u         entity.User
+			descNull  sql.NullString
+			photoNull sql.NullString
+		)
+		if err := rows.Scan(
+			&u.ID,
+			&u.TelegramID,
+			&u.Username,
+			&u.Age,
+			&u.Gender,
+			&u.Location,
+			&descNull,
+			&photoNull,
+			&u.IsVisible,
+			&u.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		if descNull.Valid {
+			u.Description = descNull.String
+		}
+		if photoNull.Valid {
+			u.PhotoURL = photoNull.String
+		}
+		users = append(users, &u)
 	}
-	return ids, nil
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return users, nil
 }
 
 func (db *PostgresDB) ToggleVisibility(ctx context.Context, userID int64, isVisible bool) error {
@@ -205,5 +241,29 @@ func (db *PostgresDB) ToggleVisibility(ctx context.Context, userID int64, isVisi
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+func (db *PostgresDB) UpdatePhoto(ctx context.Context, userID int64, url string) error {
+	query := `
+		UPDATE users
+		SET photo_url = $1
+		WHERE id = $2
+	`
+
+	res, err := db.DB.ExecContext(ctx, query, url, userID)
+	if err != nil {
+		return err
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rows == 0 {
+		return errors.New("user not found")
+	}
+
 	return nil
 }

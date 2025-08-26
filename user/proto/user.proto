@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package user;
+
+option go_package = "user/proto;userpb";
+
+service UserService {
+  rpc GetByTelegramID(GetByTelegramIDRequest) returns (UserResponse);
+  rpc RegisterUser(RegisterUserRequest) returns (UserResponse);
+  rpc GetProfile(GetProfileRequest) returns (UserResponse);
+  rpc UpdateProfile(UpdateProfileRequest) returns (UserResponse);
+  rpc GetCandidates(GetCandidatesRequest) returns (GetCandidatesResponse);
+  rpc ToggleVisibility(ToggleVisibilityRequest) returns (ToggleVisibilityResponse);
+  rpc PhotoUpload(PhotoUploadRequest) returns (PhotoUploadResponse);
+}
+
+// -------------------- Requests --------------------
+message GetByTelegramIDRequest {
+  int64 telegram_id = 1;
+}
+
+message RegisterUserRequest {
+  int64 telegram_id = 1;
+  string username   = 2;
+  int32 age         = 3;
+  string gender     = 4;
+  string location   = 5;
+  string description = 6;
+  bool is_visible   = 7;
+}
+
+message GetProfileRequest {
+  int64 user_id = 1;
+}
+
+message UpdateProfileRequest {
+  int64 user_id     = 1;
+  string username   = 2;
+  int32 age         = 3;
+  string gender     = 4;
+  string location   = 5;
+  string description = 6;
+  bool is_visible   = 7;
+}
+
+message GetCandidatesRequest {
+  string target_gender = 1;
+  int32 min_age        = 2;
+  int32 max_age        = 3;
+  string location      = 4;
+  int32 limit          = 5;
+}
+
+message ToggleVisibilityRequest {
+  int64 user_id = 1;
+  bool is_visible = 2;
+}
+
+message PhotoUploadRequest {
+  int64 user_id = 1;
+  bytes file    = 2;
+}
+
+// -------------------- Responses --------------------
+message UserResponse {
+  User user = 1;
+}
+
+message GetCandidatesResponse {
+  repeated User candidates = 1;
+}
+
+message ToggleVisibilityResponse {
+  bool success = 1;
+}
+
+message PhotoUploadResponse {
+  string photo_url = 1;
+}
+
+// -------------------- Entities --------------------
+message User {
+  int64 id          = 1;
+  int64 telegram_id = 2;
+  string username   = 3;
+  int32 age         = 4;
+  string gender     = 5;
+  string location   = 6;
+  string description = 7;
+  string photo_url  = 8;
+  bool is_visible   = 9;
+  string created_at = 10;
+}

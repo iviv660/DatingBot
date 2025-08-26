@@ -24,10 +24,10 @@ func NewMinio(client *s3.Client, bucketName string) *Minio {
 }
 
 // Реализация интерфейса PhotoUploader
-func (u *Minio) Upload(userID int64, file io.Reader) (string, error) {
+func (u *Minio) Upload(ctx context.Context, userID int64, file io.Reader) (string, error) {
 	key := fmt.Sprintf("users/%d/%d.jpg", userID, time.Now().UnixNano())
 
-	_, err := u.Client.PutObject(context.Background(), &s3.PutObjectInput{
+	_, err := u.Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(u.BucketName),
 		Key:    aws.String(key),
 		Body:   file,
