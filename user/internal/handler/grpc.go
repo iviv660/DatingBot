@@ -3,6 +3,8 @@ package handler
 import (
 	"bytes"
 	"context"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"time"
 
 	"app/user/internal/dto"
@@ -97,15 +99,19 @@ func (h *Handler) ToggleVisibility(ctx context.Context, req *userpb.ToggleVisibi
 }
 
 func (h *Handler) PhotoUpload(ctx context.Context, req *userpb.PhotoUploadRequest) (*userpb.PhotoUploadResponse, error) {
-	reader := bytes.NewReader(req.GetFile())
-	if err := h.uc.UploadPhoto(ctx, req.GetUserId(), reader); err != nil {
-		return nil, err
+	if req == nil || len(req.GetFile()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "empty file")
 	}
-	// вернуть актуальный photo_url из профиля
+
+	if _, err := h.uc.UploadPhoto(ctx, req.GetUserId(), bytes.NewReader(req.GetFile())); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
 	u, err := h.uc.GetUserByID(ctx, req.GetUserId())
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.Internal, err.Error())
 	}
+
 	return &userpb.PhotoUploadResponse{PhotoUrl: u.PhotoURL}, nil
 }
 

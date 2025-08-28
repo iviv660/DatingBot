@@ -2,42 +2,36 @@ package database
 
 import (
 	"context"
-	"log"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+	"strings"
 )
 
-func ConnectMinio(ctx context.Context, endpoint, accessKey, secretKey string) (*s3.Client, error) {
-	// фиктивный регион для MinIO
-	const defaultRegion = "us-east-1"
+func ConnectMinio(ctx context.Context, endpoint, accessKey, secretKey string) (*minio.Client, error) {
+	ep := strings.TrimSpace(endpoint)
 
-	customResolver := aws.EndpointResolverWithOptionsFunc(
-		func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-			return aws.Endpoint{
-				URL:           endpoint,
-				SigningRegion: defaultRegion,
-			}, nil
-		})
-
-	cfg, err := config.LoadDefaultConfig(
-		ctx,
-		config.WithRegion(defaultRegion),
-		config.WithEndpointResolverWithOptions(customResolver),
-		config.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
-		),
-	)
+	cli, err := minio.New(ep, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: false,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	client := s3.NewFromConfig(cfg, func(o *s3.Options) {
-		o.UsePathStyle = true // обязательно для MinIO
-	})
+	if _, err := cli.ListBuckets(ctx); err != nil {
+		return nil, err
+	}
 
-	log.Println("✅ MinIO connected")
-	return client, nil
+	return cli, nil
+}
+
+func EnsureBucket(ctx context.Context, cli *minio.Client, bucket string) error {
+	exists, err := cli.BucketExists(ctx, bucket)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return cli.MakeBucket(ctx, bucket, minio.MakeBucketOptions{})
+	}
+	return nil
 }

@@ -103,18 +103,18 @@ func (uc *Usecase) ToggleVisibility(ctx context.Context, userID int64, isVisible
 	return nil
 }
 
-func (uc *Usecase) UploadPhoto(ctx context.Context, userID int64, reader io.Reader) error {
-	url, err := uc.uploader.Upload(ctx, userID, reader)
+func (uc *Usecase) UploadPhoto(ctx context.Context, userID int64, file io.Reader) (string, error) {
+	url, err := uc.uploader.Upload(ctx, userID, file)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if err := uc.repo.UpdatePhoto(ctx, userID, url); err != nil {
-		return err
+		return "", err
 	}
 
 	if err := uc.cache.Invalidate(ctx, userID); err != nil {
 		log.Println("cache invalidate error:", err)
 	}
-	return nil
+	return url, nil
 }

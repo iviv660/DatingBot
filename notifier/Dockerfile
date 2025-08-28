@@ -5,16 +5,15 @@ RUN apk add --no-cache git ca-certificates && update-ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download
 
+COPY match/proto/ ./match/proto/
 COPY user/proto/ ./user/proto/
-
-COPY match/ ./match/
+COPY notifier/ ./notifier/
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-    go build -trimpath -ldflags "-s -w" -o /app ./match/cmd/app
+    go build -trimpath -ldflags "-s -w" -o /app ./notifier/cmd/app
 
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /
 COPY --from=builder /app /app
-EXPOSE 50052
 USER nonroot:nonroot
 ENTRYPOINT ["/app"]

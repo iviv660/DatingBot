@@ -13,6 +13,7 @@ type config struct {
 	MINIO_SECRET_KEY string
 	MINIO_BUCKET     string
 	GRPC_PORT        string
+	MINIO_BASE_URL   string
 }
 
 var C config
@@ -24,8 +25,9 @@ func Load() {
 		MINIO_ENDPOINT:   getEnv("USER_MINIO_ENDPOINT", ""),
 		MINIO_ACCESS_KEY: getEnv("USER_MINIO_ACCESS_KEY", ""),
 		MINIO_SECRET_KEY: getEnv("USER_MINIO_SECRET_KEY", ""),
-		MINIO_BUCKET:     getEnv("USER_MINIO_BUCKET", "users"),
+		MINIO_BUCKET:     getEnv("USER_MINIO_BUCKET", ""),
 		GRPC_PORT:        getEnv("USER_GRPC_PORT", ":50051"),
+		MINIO_BASE_URL:   getEnv("USER_MINIO_BASE_URL", ""),
 	}
 
 	log.Println("✅ Config loaded")

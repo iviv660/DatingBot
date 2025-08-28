@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/lib/pq"
 )
 
 // UserRepo — интерфейс теперь с контекстами, можешь вынести его в doma
@@ -176,20 +177,29 @@ func (db *PostgresDB) UpdateProfile(ctx context.Context, userID int64, input dto
 
 	return user, nil
 }
+
 func (db *PostgresDB) GetCandidates(ctx context.Context, filter dto.CandidateFilter) ([]*entity.User, error) {
 	query := `
-		SELECT 
-			id, telegram_id, username, age, gender, location, description, photo_url, is_visible, created_at
-		FROM users
-		WHERE gender = $1
-		  AND age >= $2
-		  AND age <= $3
-		  AND location = $4
-		  AND is_visible = TRUE
-		LIMIT $5
-	`
+        SELECT 
+            id, telegram_id, username, age, gender, location, description, photo_url, is_visible, created_at
+        FROM users
+        WHERE gender = $1
+          AND age BETWEEN $2 AND $3
+          AND location = $4
+          AND is_visible = TRUE
+          AND id <> ALL(COALESCE($6::bigint[], '{}'))  -- исключаем переданные ID
+        ORDER BY id
+        LIMIT $5
+    `
 
-	rows, err := db.DB.QueryContext(ctx, query, filter.TargetGender, filter.MinAge, filter.MaxAge, filter.Location, filter.Limit)
+	rows, err := db.DB.QueryContext(ctx, query,
+		filter.TargetGender,
+		filter.MinAge,
+		filter.MaxAge,
+		filter.Location,
+		filter.Limit,
+		pq.Array(filter.ExcludeIDs), // <-- важно
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -224,11 +234,9 @@ func (db *PostgresDB) GetCandidates(ctx context.Context, filter dto.CandidateFil
 		}
 		users = append(users, &u)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-
 	return users, nil
 }
 

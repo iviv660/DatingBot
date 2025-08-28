@@ -8,6 +8,7 @@ import (
 	"app/user/internal/usecase"
 	userpb "app/user/proto"
 	"context"
+	"errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 	"log"
@@ -36,9 +37,12 @@ func main() {
 		config.C.MINIO_ACCESS_KEY,
 		config.C.MINIO_SECRET_KEY)
 	if err != nil {
+		log.Fatal(errors.New("failed to connect to minio: \n" + err.Error()))
+	}
+	if err := database.EnsureBucket(context.Background(), minioCon, config.C.MINIO_BUCKET); err != nil {
 		log.Fatal(err)
 	}
-	minio := repository.NewMinio(minioCon, config.C.MINIO_BUCKET)
+	minio := repository.NewMinio(minioCon, config.C.MINIO_BUCKET, config.C.MINIO_BASE_URL)
 
 	uc := usecase.New(postgres, redis, minio)
 	h := handler.NewHandler(uc)
