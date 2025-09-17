@@ -14,11 +14,11 @@ services:
         condition: service_completed_successfully
       user_redis:
         condition: service_started
-      user_minio:
+      user-minio:
         condition: service_healthy
     restart: unless-stopped
 
-  user_minio:
+  user-minio:
     image: minio/minio:latest
     container_name: user_minio
     env_file:
