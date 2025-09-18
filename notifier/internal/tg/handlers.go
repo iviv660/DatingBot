@@ -25,7 +25,7 @@ func NewHandler(bot *tb.Bot, core *internal.Core) *Handler {
 func (h *Handler) Register() {
 	h.bot.Handle("/start", h.onStart)
 	h.bot.Handle(tb.OnText, h.onText)
-	h.bot.Handle(tb.OnPhoto, h.onPhoto) // ← убрали опечатку
+	h.bot.Handle(tb.OnPhoto, h.onPhoto)
 }
 
 const (
@@ -50,7 +50,7 @@ func (h *Handler) onStart(c tb.Context) error {
 func (h *Handler) onText(c tb.Context) error {
 	txt := c.Text()
 
-	// Лайк/дизлайк/пауза — теперь приходят как текстовые кнопки
+	// Кнопки лайк/дизлайк/сон приходят как текст
 	if txt == "❤️" || txt == "👎" || txt == "💤" {
 		var action string
 		switch txt {
@@ -71,7 +71,7 @@ func (h *Handler) onText(c tb.Context) error {
 		return h.render(c, out)
 	}
 
-	// Всё остальное — обычный текстовый поток (меню 1/2/3, «Парень/Девушка», и т.д.)
+	// Остальной текст (меню 1/2/3, пол, ответы на вопросы анкеты)
 	ctx, cancel := context.WithTimeout(context.Background(), tmoText)
 	defer cancel()
 	out, err := h.core.OnText(ctx, c.Sender().ID, txt)
@@ -89,7 +89,7 @@ func (h *Handler) onPhoto(c tb.Context) error {
 	}
 
 	file := p.MediaFile()
-	rc, err := h.bot.File(file) // ВАЖНО: передаём адрес
+	rc, err := h.bot.File(file) // telebot ожидает *tb.File
 	if err != nil {
 		log.Printf("tg.getFile: %v", err)
 		return c.Send("Не удалось получить фото, попробуй ещё раз.")
@@ -134,10 +134,8 @@ func (h *Handler) render(c tb.Context, out internal.Output) error {
 		if photo != nil {
 			return c.Send(photo, keyboardByKind(out.Kind))
 		}
-		// неизвестный формат — упадём в текст
+		// если формат неизвестен — отправим как текст
 	}
-
-	// Иначе — обычный текст
 	return c.Send(out.Text, keyboardByKind(out.Kind))
 }
 

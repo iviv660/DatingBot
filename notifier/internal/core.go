@@ -2,10 +2,11 @@ package internal
 
 import (
 	userpb "app/user/proto"
+	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -39,11 +40,16 @@ const (
 	stBrowsing
 )
 
+type candidate struct {
+	UserID     int64
+	TelegramID int64
+}
+
 type session struct {
 	State         state
 	Draft         draftProfile
-	Candidates    []int64
-	CurrentTarget int64
+	Candidates    []candidate
+	CurrentTarget *candidate
 	UpdatedAt     time.Time
 }
 
@@ -94,7 +100,12 @@ func (c *Core) reset(chatID int64) {
 func (c *Core) OnStart(ctx context.Context, chatID int64) (Output, error) {
 	u, err := c.users.GetByTelegramID(ctx, chatID)
 	if err != nil {
-		log.Printf("core: GetByTelegramID: %v", err)
+		if strings.Contains(strings.ToLower(err.Error()), "user not found") {
+			u = nil
+		} else {
+			log.Printf("core: GetByTelegramID: %v", err)
+			return Output{Text: "Сервис недоступен. Попробуй позже."}, nil
+		}
 	}
 
 	s := c.get(chatID)
@@ -108,12 +119,8 @@ func (c *Core) OnStart(ctx context.Context, chatID int64) (Output, error) {
 	s.State = stMenu
 	s.UpdatedAt = time.Now()
 	return Output{
-		Text: fmt.Sprintf(
-			"%s, %d, %s — %s\n\nВыбери действие:\n1. Смотреть анкеты 🚀\n2. Моя анкета 📱\n3. Изменить анкету ✏️",
-			u.GetUsername(), u.GetAge(), u.GetLocation(), u.GetDescription(),
-		),
-		Kind:        ReplyMenu,
-		PhotoString: u.GetPhotoUrl(),
+		Text: "\nВыбери действие:\n1. Смотреть анкеты 🚀\n2. Моя анкета 📱\n3. Изменить анкету ✏️",
+		Kind: ReplyMenu,
 	}, nil
 }
 
@@ -125,6 +132,7 @@ func (c *Core) OnText(ctx context.Context, chatID int64, text string) (Output, e
 		s.State = stAskAge
 		s.UpdatedAt = time.Now()
 		return Output{Text: "Сколько тебе лет?"}, nil
+
 	case stAskAge:
 		var age int32
 		_, err := fmt.Sscanf(text, "%d", &age)
@@ -135,24 +143,28 @@ func (c *Core) OnText(ctx context.Context, chatID int64, text string) (Output, e
 		s.State = stAskCity
 		s.UpdatedAt = time.Now()
 		return Output{Text: "Где ты живёшь? Укажи город."}, nil
+
 	case stAskCity:
 		s.Draft.City = text
 		s.State = stAskGender
 		s.UpdatedAt = time.Now()
 		return Output{Text: "Выбери пол:", Kind: ReplyGender}, nil
+
 	case stAskGender:
 		if text != "Парень" && text != "Девушка" {
-			return Output{Text: "Укажи Свой пол", Kind: ReplyGender}, nil
+			return Output{Text: "Пожалуйста, выбери кнопкой: Парень или Девушка.", Kind: ReplyGender}, nil
 		}
 		s.Draft.Gender = text
 		s.State = stAskDesc
 		s.UpdatedAt = time.Now()
 		return Output{Text: "Кратко опиши себя (интересы, что ищешь)."}, nil
+
 	case stAskDesc:
 		s.Draft.Description = text
 		s.State = stAskPhoto
 		s.UpdatedAt = time.Now()
 		return Output{Text: "Пришли фото для анкеты (одно изображение)."}, nil
+
 	case stMenu:
 		switch text {
 		case "1":
@@ -167,8 +179,10 @@ func (c *Core) OnText(ctx context.Context, chatID int64, text string) (Output, e
 		default:
 			return Output{Text: "Выбери пункт меню: 1 (смотреть), 2 (моя анкета), 3 (изменить).", Kind: ReplyMenu}, nil
 		}
+
 	case stBrowsing:
-		return Output{Text: "Используй кнопки: ❤ / 👎 / 💤", Kind: ReplyBrowse}, nil
+		return Output{Text: "Используй кнопки: ❤️ / 👎 / 💤", Kind: ReplyBrowse}, nil
+
 	default:
 		s.State = stAskName
 		return Output{Text: "Давай начнём с начала. Как тебя зовут?"}, nil
@@ -180,7 +194,8 @@ func (c *Core) OnPhoto(ctx context.Context, chatID int64, photo []byte) (Output,
 	if s.State != stAskPhoto {
 		return Output{Text: "Фото сейчас не требуется. Используй меню."}, nil
 	}
-	// s.Draft.PhotoBytes = photo // ← УДАЛИТЬ, такого поля больше нет
+
+	existing, _ := c.users.GetByTelegramID(ctx, chatID)
 
 	u := &userpb.User{
 		TelegramId:  chatID,
@@ -191,18 +206,28 @@ func (c *Core) OnPhoto(ctx context.Context, chatID int64, photo []byte) (Output,
 		Description: s.Draft.Description,
 		IsVisible:   true,
 	}
-	created, err := c.users.Create(ctx, u)
-	if err != nil {
-		log.Printf("core: Create user: %v", err)
-		return Output{Text: "Не удалось сохранить анкету. Попробуй ещё раз."}, nil
+
+	var saved *userpb.User
+	var err error
+
+	if existing == nil {
+		saved, err = c.users.Create(ctx, u)
+		if err != nil {
+			log.Printf("core: Create user: %v", err)
+			return Output{Text: "Не удалось сохранить анкету. Попробуй ещё раз."}, nil
+		}
+	} else {
+		u.Id = existing.GetId()
+		saved, err = c.users.Update(ctx, u)
+		if err != nil {
+			log.Printf("core: Update user: %v", err)
+			return Output{Text: "Не удалось обновить анкету. Попробуй ещё раз."}, nil
+		}
 	}
 
-	updated := created
 	if len(photo) > 0 {
-		if u2, err := c.users.UpdatePhoto(ctx, created.GetId(), bytesReader(photo)); err != nil {
-			log.Printf("core: UpdatePhoto: %v", err)
-		} else if u2 != nil {
-			updated = u2
+		if u2, err := c.users.UpdatePhoto(ctx, saved.GetId(), bytes.NewReader(photo)); err == nil && u2 != nil {
+			saved = u2
 		}
 	}
 
@@ -211,17 +236,14 @@ func (c *Core) OnPhoto(ctx context.Context, chatID int64, photo []byte) (Output,
 	s.UpdatedAt = time.Now()
 
 	return Output{
-		Text: fmt.Sprintf(
-			"%s, %d, %s — %s\n\nАнкета сохранена! Что дальше?\n1. Смотреть анкеты 🚀\n2. Моя анкета 📱\n3. Изменить анкету ✏️",
-			updated.GetUsername(), updated.GetAge(), updated.GetLocation(), updated.GetDescription(),
-		),
-		Kind:        ReplyMenu,
-		PhotoString: updated.GetPhotoUrl(),
+		Text: "Анкета сохранена! Что дальше?\n1. Смотреть анкеты 🚀\n2. Моя анкета 📱\n3. Изменить анкету ✏️",
+		Kind: ReplyMenu,
 	}, nil
 }
 
 func (c *Core) OnCallback(ctx context.Context, chatID int64, action string) (Output, error) {
 	s := c.get(chatID)
+
 	if s.State == stAskGender && (action == "gender_male" || action == "gender_female") {
 		if action == "gender_male" {
 			s.Draft.Gender = "Парень"
@@ -232,57 +254,90 @@ func (c *Core) OnCallback(ctx context.Context, chatID int64, action string) (Out
 		s.UpdatedAt = time.Now()
 		return Output{Text: "Кратко опиши себя."}, nil
 	}
-	if s.State == stBrowsing {
-		switch action {
-		case "like":
-			if s.CurrentTarget == 0 {
-				return Output{Text: "Кандидатов больше нет.", Kind: ReplyMenu}, nil
-			}
-			if err := c.match.Like(ctx, chatID, s.CurrentTarget, true); err != nil {
-				log.Printf("core: Like: %v", err)
-			}
-			return c.nextCandidate(ctx, chatID)
-		case "dislike":
-			if err := c.match.Like(ctx, chatID, s.CurrentTarget, false); err != nil {
-				log.Printf("core: Dislike: %v", err)
-			}
-			return c.nextCandidate(ctx, chatID)
-		case "sleep":
+
+	if s.State != stBrowsing {
+		return Output{Text: "Действие сейчас недоступно. Используй меню."}, nil
+	}
+
+	switch action {
+	case "like", "dislike":
+		if s.CurrentTarget == nil {
 			s.State = stMenu
 			s.UpdatedAt = time.Now()
-			return Output{
-				Text: "Ок, вернулись в меню.\n1. Смотреть анкеты 🚀\n2. Моя анкета 📱\n3. Изменить анкету ✏️",
-				Kind: ReplyMenu,
-			}, nil
+			return Output{Text: "Кандидатов больше нет.\nЧто дальше?\n1. Смотреть анкеты 🚀\n2. Моя анкета 📱\n3. Изменить анкету ✏", Kind: ReplyMenu}, nil
 		}
+
+		me, err := c.users.GetByTelegramID(ctx, chatID)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "user not found") {
+				return Output{Text: "Сначала зарегистрируй анкету: /start"}, nil
+			}
+			log.Printf("core: GetByTelegramID: %v", err)
+			return Output{Text: "Сервис недоступен, попробуй позже."}, nil
+		}
+
+		isLike := action == "like"
+		if err := c.match.Like(ctx, me.GetId(), s.CurrentTarget.UserID, isLike); err != nil {
+			log.Printf("core: Like(%v): %v", isLike, err)
+		}
+
+		if isLike {
+			if ok, err := c.match.Match(ctx, me.GetId(), s.CurrentTarget.UserID); err == nil && ok {
+				out, err := c.nextCandidate(ctx, chatID)
+				if err == nil {
+					if out.Text != "" {
+						out.Text = "🎉 У тебя совпадение!\n\n" + out.Text
+					} else {
+						out.Text = "🎉 У тебя совпадение!"
+					}
+					return out, nil
+				}
+			}
+		}
+		return c.nextCandidate(ctx, chatID)
+
+	case "sleep":
+		s.State = stMenu
+		s.UpdatedAt = time.Now()
+		return Output{
+			Text: "Ок, вернулись в меню.\n1. Смотреть анкеты 🚀\n2. Моя анкета 📱\n3. Изменить анкету ✏️",
+			Kind: ReplyMenu,
+		}, nil
 	}
+
 	return Output{Text: "Неизвестное действие."}, nil
 }
 
 func (c *Core) startBrowsing(ctx context.Context, chatID int64) (Output, error) {
 	u, err := c.users.GetByTelegramID(ctx, chatID)
 	if err != nil {
-		return Output{}, err
+		if strings.Contains(strings.ToLower(err.Error()), "user not found") {
+			s := c.get(chatID)
+			s.State = stAskName
+			return Output{Text: "Похоже, анкеты нет. Давай создадим! Как тебя зовут?"}, nil
+		}
+		return Output{Text: "Сервис недоступен, попробуй позже."}, nil
 	}
-	if u == nil {
-		s := c.get(chatID)
-		s.State = stAskName
-		return Output{Text: "Похоже, анкеты нет. Как тебя зовут?"}, nil
-	}
+
 	cands, err := c.match.GetCandidates(ctx, u.GetId())
 	if err != nil {
-		return Output{}, err
+		return Output{Text: "Не удалось получить кандидатов. Попробуй позже."}, nil
 	}
 	if len(cands) == 0 {
-		return Output{Text: "Пока нет подходящих анкет. Попробуй позже.", Kind: ReplyMenu}, nil
+		return Output{Text: "Пока нет подходящих анкет.\nЧто дальше?\n1. Смотреть анкеты 🚀\n2. Моя анкета 📱\n3. Изменить анкету ✏", Kind: ReplyMenu}, nil
 	}
+
 	s := c.get(chatID)
 	s.Candidates = s.Candidates[:0]
 	for _, cand := range cands {
-		s.Candidates = append(s.Candidates, cand.GetTelegramId())
+		s.Candidates = append(s.Candidates, candidate{
+			UserID:     cand.GetId(),
+			TelegramID: cand.GetTelegramId(),
+		})
 	}
 	s.State = stBrowsing
 	s.UpdatedAt = time.Now()
+
 	return c.nextCandidate(ctx, chatID)
 }
 
@@ -290,19 +345,23 @@ func (c *Core) nextCandidate(ctx context.Context, chatID int64) (Output, error) 
 	s := c.get(chatID)
 	if len(s.Candidates) == 0 {
 		s.State = stMenu
-		return Output{Text: "Анкеты закончились. Возвращаемся в меню.", Kind: ReplyMenu}, nil
+		return Output{Text: "Анкеты закончились. Возвращаемся в меню.\nЧто дальше?\n1. Смотреть анкеты 🚀\n2. Моя анкета 📱\n3. Изменить анкету ✏", Kind: ReplyMenu}, nil
 	}
+
 	last := s.Candidates[len(s.Candidates)-1]
 	s.Candidates = s.Candidates[:len(s.Candidates)-1]
-	s.CurrentTarget = last
+	s.CurrentTarget = &last
 	s.UpdatedAt = time.Now()
 
-	target, err := c.users.GetByTelegramID(ctx, last)
+	target, err := c.users.GetByID(ctx, last.UserID)
 	if err != nil || target == nil {
+		target, _ = c.users.GetByTelegramID(ctx, last.TelegramID)
+	}
+	if target == nil {
 		return Output{Text: "Не удалось получить профиль кандидата. Пробуем следующего…"}, nil
 	}
 
-	caption := fmt.Sprintf("%s, %d, %s — %s",
+	caption := fmt.Sprintf("%s, %d, %s\n%s",
 		target.GetUsername(), target.GetAge(), target.GetLocation(), target.GetDescription())
 
 	return Output{
@@ -315,28 +374,17 @@ func (c *Core) nextCandidate(ctx context.Context, chatID int64) (Output, error) 
 func (c *Core) showProfile(ctx context.Context, chatID int64) (Output, error) {
 	u, err := c.users.GetByTelegramID(ctx, chatID)
 	if err != nil {
-		return Output{}, err
+		if strings.Contains(strings.ToLower(err.Error()), "user not found") {
+			return Output{Text: "Анкета не найдена. Давай создадим! Как тебя зовут?"}, nil
+		}
+		return Output{Text: "Сервис недоступен. Попробуй позже."}, nil
 	}
-	if u == nil {
-		return Output{Text: "Анкета не найдена. Давай создадим! Как тебя зовут?"}, nil
-	}
+	caption := fmt.Sprintf("Твоя анкета:\n%s, %d, %s\n%s",
+		u.GetUsername(), u.GetAge(), u.GetLocation(), u.GetDescription())
+
 	return Output{
-		Text: fmt.Sprintf("Твоя анкета: %s, %d, %s — %s",
-			u.GetUsername(), u.GetAge(), u.GetLocation(), u.GetDescription()),
+		Text:        caption,
 		Kind:        ReplyMenu,
 		PhotoString: u.GetPhotoUrl(),
 	}, nil
-}
-
-type byteReader struct{ b []byte }
-
-func bytesReader(b []byte) *byteReader { return &byteReader{b: b} }
-
-func (r *byteReader) Read(p []byte) (int, error) {
-	if len(r.b) == 0 {
-		return 0, io.EOF
-	}
-	n := copy(p, r.b)
-	r.b = r.b[n:]
-	return n, nil
 }
